@@ -1,10 +1,19 @@
 import argparse
 import os
+from sklearn.ensemble import RandomForestRegressor, StackingRegressor
+from sklearn.feature_selection import SelectFromModel
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.linear_model import Lasso, LinearRegression, Ridge
 import numpy as np
 import pandas as pd
+
 from sklearn.calibration import LabelEncoder
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, train_test_split
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.preprocessing import OneHotEncoder
+
 
 def pre(player_df):
     """
@@ -169,13 +178,42 @@ def _reorder_columns(df, target='PTS'):
     return df
 
 
+def train_stacked_model(X_train, y_train):
+    # Set up base estimators for stacking
+    base_estimators = [
+        ('ridge', Ridge(alpha=0.001, random_state=42)),
+        ('random_forest', RandomForestRegressor(n_estimators=100, random_state=42))
+    ]
 
+    # Set up stacking regressor
+    stack_reg = StackingRegressor(
+        estimators=base_estimators,
+        final_estimator=Ridge(alpha=0.001, random_state=42)
+    )
+
+    # Fit the stacked model
+    stack_reg.fit(X_train, y_train)
+
+    return stack_reg
+
+
+def evaluate_model(model, X_test, y_test):
+    # Predict on test data
+    y_pred = model.predict(X_test)
+    
+    # Calculate mean squared error
+    mse = mean_squared_error(y_test, y_pred)
+    
+    # Calculate R-squared
+    r2 = r2_score(y_test, y_pred)
+    
+    return mse, r2
 
 
     
 
 
-def create_split(df):
+def create_split(X,y):
     """
     Create the train-test split. The method should be 
     randomized so each call will likely yield different 
@@ -193,31 +231,36 @@ def create_split(df):
         return the test dataset as a pandas dataframe.
     """
 
-    train_df, test_df = train_test_split(df, test_size=0.2)
-    return train_df, test_df
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    return X_train, X_test, y_train, y_test
 
 
 def main():
-    """
-    Main file to run from the command line.
-    """
-    # set up the program to take in arguments from the command line
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input", 
-                        help="filename of training data")
-    args = parser.parse_args()
-    df = pd.read_csv(args.input)
-    df = pre(df)
-    train_df, test_df = create_split(df)
-    # solution here
-
     
-    nonext = os.path.splitext(args.input)[0]
-    print("Training DF Shape:", train_df.shape)
-    train_df.to_csv(nonext+"_train.csv", index=False)
-    print("Test DF Shape:", test_df.shape)
-    test_df.to_csv(nonext+"_test.csv", index=False)
+    
+    parser = argparse.ArgumentParser(description="Run a stacked ensemble with Ridge regression and RandomForestRegressor.")
+    parser.add_argument("input", help="filename of the dataset for training")
+    args = parser.parse_args()
 
+    # Load and preprocess the data
+    df = pd.read_csv(args.input)
+    cleaned_df = pre(df)
+
+    # Prepare the data
+    X = cleaned_df.drop('PTS', axis=1)
+    y = cleaned_df['PTS']
+
+    # Create train-test split
+    X_train, X_test, y_train, y_test = create_split(X, y)
+
+    # Train stacked model
+    stacked_model = train_stacked_model(X_train, y_train)
+
+    # Evaluate the model
+    mse, r2 = evaluate_model(stacked_model, X_test, y_test)
+
+    print("MSE:", mse)
+    print("R-squared:", r2)
 
 if __name__ == "__main__":
     main()
