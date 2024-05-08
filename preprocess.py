@@ -1,6 +1,6 @@
 import argparse
 import os
-from sklearn.ensemble import RandomForestRegressor, StackingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, StackingRegressor
 from sklearn.feature_selection import SelectFromModel
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.linear_model import Lasso, LinearRegression, Ridge
@@ -33,84 +33,58 @@ def pre(player_df):
     """
     team_df = pd.read_csv("team_traditional.csv")
 
-     # Load team data
+ 
     
-    print("Team DF columns:", team_df.columns)  # Initial check
+    
 
-    # Self-merge to find opposing team points in the same game
+  
     merged_team_df = pd.merge(team_df, team_df, on='gameid', suffixes=('', '_opponent'))
-    print("Merged Team DF columns:", merged_team_df.columns)  # Check after merge
+    
 
     merged_team_df = merged_team_df[merged_team_df['team'] != merged_team_df['team_opponent']]
 
-    # Assign points scored by the opponent as points against
     merged_team_df['PTS_Against'] = merged_team_df['PTS_opponent']
     merged_team_df['opponent_team'] = merged_team_df['team_opponent']
 
-    # Prepare the final DataFrame with defensive stats
     final_df = merged_team_df[['gameid', 'team', 'opponent_team', 'PTS_Against']].copy()
     final_df.sort_values(by=['team', 'gameid'], inplace=True)
 
-    # Calculate rolling averages for points given up
     final_df['Avg_PTS_Given_Up_Last_5'] = final_df.groupby('team')['PTS_Against'].rolling(window=5, min_periods=1).mean().reset_index(level=0, drop=True)
     final_df['Avg_PTS_Given_Up_Last_20'] = final_df.groupby('team')['PTS_Against'].rolling(window=20, min_periods=1).mean().reset_index(level=0, drop=True)
-    print("Final DF columns after rolling calc:", final_df.columns)  # Check columns
+    
 
-    # Load player data
+
   
     player_df['opponent_team'] = player_df.apply(lambda row: row['away'] if row['team'] == row['home'] else row['home'], axis=1)
 
-    # Merge player data with team defensive stats
     merged_df = pd.merge(player_df, final_df, how='left', on=['gameid', 'opponent_team'])
-    print("Merged DF columns:", merged_df.columns)  # Final check before select
 
-    # Selecting necessary columns
     try:
         columns_to_keep = ['gameid', 'date', 'playerid', 'player', 'team', 'PTS', 'MIN', 'Avg_PTS_Given_Up_Last_5', 'Avg_PTS_Given_Up_Last_20']
         columns_to_keep.extend(player_df.columns.difference(['opponent_team', 'home', 'away', 'Avg_PTS_Given_Up_Last_5', 'Avg_PTS_Given_Up_Last_20']).tolist())
         merged_df = merged_df[columns_to_keep]
     except KeyError as e:
         print(f"KeyError: {e}")
-        print("Available columns:", merged_df.columns)  # Help diagnose what's missing
+        print("Available columns:", merged_df.columns) 
 
-    
 
-# Assuming file paths are correctly specified
-
-    
     combined_df = merged_df
-    # Clean and prepare final dataset
+
     combined_df.dropna(inplace=True)
     combined_df.drop_duplicates(inplace=True)
 
-    # Ensure date column is correct and calculate player-specific rolling averages
     combined_df['date'] = pd.to_datetime(combined_df['date'])
     combined_df.sort_values(by=['player', 'date'], inplace=True)
     combined_df['Avg_Last_5_Games'] = combined_df.groupby('player')['PTS'].rolling(window=5, min_periods=1).mean().reset_index(level=0, drop=True)
     combined_df['Avg_Last_20_Games'] = combined_df.groupby('player')['PTS'].rolling(window=20, min_periods=1).mean().reset_index(level=0, drop=True)
 
-   
-
-
-
-# Step 2: Calculate rolling average for last 5 games and 20 games
 
     df = combined_df.copy()
 
-
-
-
-
-    
-    
-    # Drop rows with negative values
     df.drop('gameid', axis=1, inplace=True)
     df.drop('win', axis=1, inplace=True)
     df.drop('MIN', axis=1, inplace=True)
     df = df[df['season'] >= 2012]
-
-    
-
     df.drop('FGM', axis=1, inplace=True)
     df.drop('FGA', axis=1, inplace=True)
     df.drop('FG%', axis=1, inplace=True)
@@ -133,103 +107,167 @@ def pre(player_df):
     df.drop('+/-', axis=1, inplace=True)
     df.drop('opponent_team', axis=1, inplace=True)
     df.drop('team_y', axis=1, inplace=True)
-    
     df.drop('away', axis=1, inplace=True)
-
-
     df = df.rename(columns={'team_x': 'team'})
-
     df['athome'] = np.where(df['team'] == df['home'], 1, 0)
-
     df.drop('home', axis=1, inplace=True)
     df.drop('team', axis=1, inplace=True)
     df.drop('playerid', axis=1, inplace=True)
-
     if 'type' not in df.columns:
         raise KeyError("Column 'type' does not exist in the DataFrame")
-
-# Initialize the LabelEncoder
     encoder = LabelEncoder()
-
-# Fit and transform the 'type' column to label encode it
     df['type_encoded'] = encoder.fit_transform(df['type'])
-
-# Optionally, you can drop the original 'type' column if it's no longer needed
     df.drop(columns=['type'], inplace=True)
-
-    df['date'] = pd.to_datetime(df['date'], dayfirst=True)
-
-    
-    df['Month'] = df['date'].dt.month
-    
-
-    
+    df['date'] = pd.to_datetime(df['date'], dayfirst=True)  
+    df['Month'] = df['date'].dt.month 
     df = df.drop(['date', 'date'], axis=1)
     df = _reorder_columns(df, target='PTS')
-    
-
     return df
     
 def _reorder_columns(df, target='PTS'):
-    """
-    Re-order the columns so the target is the last one
-    """
     df = df[[col for col in df.columns if col != target] + [target]]
     return df
 
-
+#Random Forest
 def train_stacked_model(X_train, y_train):
-    # Set up base estimators for stacking
+
     base_estimators = [
-        ('ridge', Ridge(alpha=0.001, random_state=42)),
-        ('random_forest', RandomForestRegressor(n_estimators=100, random_state=42))
+        ('ridge', Ridge(random_state=42)),
+        ('random_forest', RandomForestRegressor(n_estimators=50, min_samples_leaf=4, random_state=42, n_jobs=-1))
     ]
 
-    # Set up stacking regressor
-    stack_reg = StackingRegressor(
-        estimators=base_estimators,
-        final_estimator=Ridge(alpha=0.001, random_state=42)
-    )
 
-    # Fit the stacked model
-    stack_reg.fit(X_train, y_train)
+    stack_reg = StackingRegressor(estimators=base_estimators)
 
-    return stack_reg
+
+    param_grid = {
+        'ridge__alpha': [0.001, 0.01, 0.1, 1.0],  
+        'random_forest__n_estimators': [10, 50, 100, 200], 
+        'random_forest__max_features': ['sqrt', 'log2', None],  
+        'random_forest__max_depth': [None, 10, 20, 30]  
+    }
+
+    grid_search = RandomizedSearchCV(stack_reg, param_grid, n_iter=10, cv=3, scoring='neg_mean_squared_error', n_jobs=-1)
+
+    grid_search.fit(X_train, y_train)
+
+    best_stack_reg = grid_search.best_estimator_
+
+    print("Best Parameters Found:")
+    for param_name in grid_search.best_params_:
+        print(f"{param_name}: {grid_search.best_params_[param_name]}")
+
+    return best_stack_reg
+
+
+
+
+
+
+
+def train_MLR(X_train, y_train):
+
+    mlr = LinearRegression()
+
+
+    param_grid = {
+        'fit_intercept': [True, False],
+        'n_jobs': [None, -1]
+    }
+
+
+    grid_search = GridSearchCV(mlr, param_grid, cv=5, scoring='neg_mean_squared_error')
+
+    grid_search.fit(X_train, y_train)
+
+
+    for i, _ in enumerate(grid_search.cv_results_['mean_test_score'], 1):
+        print(f"Configuration {i} Score: {_}")
+
+
+    best_mlr = grid_search.best_estimator_
+
+
+    print("Best Parameters Found:")
+    print(grid_search.best_params_)
+
+    return best_mlr
+
+
+
+
+def train_KNN(X_train, y_train):
+   
+    knn = KNeighborsRegressor()
+
+
+    param_grid = {
+        'n_neighbors': [3, 5, 10],  
+        'weights': ['uniform', 'distance'],  
+        'p': [1, 2]  
+    }
+
+    grid_search = GridSearchCV(knn, param_grid, cv=5, scoring='neg_mean_squared_error', verbose=1, n_jobs=-1)
+
+
+    try:
+        grid_search.fit(X_train, y_train)
+    except Exception as e:
+        print(f"An error occurred during model fitting: {e}")
+        return None
+
+    best_knn = grid_search.best_estimator_
+
+    print("Best Parameters Found:")
+    for param_name in grid_search.best_params_:
+        print(f"{param_name}: {grid_search.best_params_[param_name]}")
+
+    return best_knn
+
+
+
+
+def train_ridge(X_train, y_train):
+
+    ridge = Ridge()
+
+
+    param_grid = {
+        'alpha': np.logspace(-6, 6, 13),  
+        'solver': ['svd', 'cholesky', 'lsqr', 'sparse_cg'],  
+        'fit_intercept': [True, False]  
+    }
+
+
+    grid_search = GridSearchCV(ridge, param_grid, cv=5, scoring='neg_mean_squared_error', verbose=1)
+
+
+    grid_search.fit(X_train, y_train)
+
+
+    print("Best parameters found: ", grid_search.best_params_)
+    best_model = grid_search.best_estimator_
+
+    return best_model
+
+
 
 
 def evaluate_model(model, X_test, y_test):
-    # Predict on test data
+
     y_pred = model.predict(X_test)
     
-    # Calculate mean squared error
     mse = mean_squared_error(y_test, y_pred)
     
-    # Calculate R-squared
     r2 = r2_score(y_test, y_pred)
     
     return mse, r2
 
 
-    
 
 
 def create_split(X,y):
-    """
-    Create the train-test split. The method should be 
-    randomized so each call will likely yield different 
-    results.
-    
-    Parameters
-    ----------
-    df : pandas.DataFrame
-
-    Returns
-    -------
-    train_df : pandas.DataFrame
-        return the training dataset as a pandas dataframe
-    test_df : pandas.DataFrame
-        return the test dataset as a pandas dataframe.
-    """
+ 
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     return X_train, X_test, y_train, y_test
@@ -254,10 +292,16 @@ def main():
     X_train, X_test, y_train, y_test = create_split(X, y)
 
     # Train stacked model
-    stacked_model = train_stacked_model(X_train, y_train)
+    #trained_model = train_stacked_model(X_train, y_train)
+    trained_model = train_KNN(X_train, y_train)
+    #trained_model = train_MLR(X_train, y_train)
+    #trained_model = train_ridge(X_train, y_train)
+  
+
+
 
     # Evaluate the model
-    mse, r2 = evaluate_model(stacked_model, X_test, y_test)
+    mse, r2 = evaluate_model(trained_model, X_test, y_test)
 
     print("MSE:", mse)
     print("R-squared:", r2)
