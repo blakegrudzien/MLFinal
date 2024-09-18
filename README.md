@@ -10,4 +10,7 @@ narrative that 'the house always wins' by exploring strategic, data-informed bet
 Our findings intend to contribute significantly to the discourse on the fairness and predictability of
 sports betting, providing insights that could reshape betting strategies and sports analytics.
 
+Full report: 
 
+
+[CS_334_Final_Project (1).pdf](https://github.com/user-attachments/files/17049187/CS_334_Final_Project.1.pdf)
